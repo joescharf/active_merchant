@@ -19,7 +19,7 @@ module ActiveMerchant #:nodoc:
       class_inheritable_accessor :test_url, :production_url, :debug_url
 
       cattr_accessor :pem_file
-      attr_reader :options, :response, :req_xml, :res_xml, :res_hsh
+      attr_reader :options, :request, :response
 
       # Setup some class variables:
       self.debug_url = 'https://webmerchantaccount.quickbooks.com/j/diag/http'
@@ -41,6 +41,8 @@ module ActiveMerchant #:nodoc:
       # * <tt>:applogin</tt> -- Application login defined at appreg.intuit.com (REQ)
       # * <tt>:conntkt</tt> -- Connection ticket for registered application (REQ)
       # * <tt>:gw_mode</tt> -- :test, :debug, :production (need the symbol!)
+      # * <tt>:test_mode_error</tt> -- forces an error from qbms - added to <NameOnCard>
+      # * set :test_mode_error to 'configid=error_code' where error_code is desired error
       ########################################################################
       def initialize(options = {})
         requires!(options, :applogin, :conntkt)        
@@ -285,6 +287,7 @@ private
                 
         # Post to server
         url = get_post_url
+        @request = xml
         data = ssl_post(url, xml, headers)
         
         response = parse(action, data)
@@ -363,6 +366,8 @@ private
         case response[:raw][:card_security_code_match]
         when "Pass"
           return "M" # Match
+        when "Fail"
+          return "N" # No Match
         else
           return "P" # Not Processed
         end
@@ -375,6 +380,8 @@ private
         case response[:raw][:avs_street]
         when "Pass"
           attrs[:street_match] = 'Y'
+        when "Fail"
+          attrs[:street_match] = 'N'
         else
           attrs[:street_match] = nil
         end        
@@ -383,9 +390,13 @@ private
         case response[:raw][:avs_zip]
         when "Pass"
           attrs[:postal_match] = 'Y'
+        when "Fail"
+          attrs[:postal_match] = 'N'
         else
           attrs[:postal_match] = nil
-        end        
+        end
+        
+        attrs        
       end
       
       # Decode and create status messages from the results of the commit
@@ -445,8 +456,9 @@ private
       end                  
       
       def add_address(xml, options) 
-        if address = options[:billing_address] || options[:address]     
-          xml.tag!('NameOnCard', address[:name])
+        if address = options[:billing_address] || options[:address]
+          # test_mode_error allows forcing a desired response from QBMS by adding configid=error_code     
+          xml.tag!('NameOnCard', @options[:test_mode_error] || address[:name])
           xml.tag!('CreditCardAddress', address[:street1] || address[:address1])
           xml.tag!('CreditCardPostalCode', address[:zip].gsub!(/[-\s]/, ''))
         end
