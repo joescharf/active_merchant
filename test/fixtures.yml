@@ -193,6 +193,14 @@ psl_visa_debit_address:
   city:
   state:
   zip:
+    
+quickbooks_merchant_service:
+  pem: |
+  applogin: 
+  conntkt: 
+  appid: 
+  cn: 
+  gw_mode: test
 
 quickpay:
   login: 89898989

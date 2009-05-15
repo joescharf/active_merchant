@@ -18,8 +18,8 @@ module ActiveMerchant #:nodoc:
 
       class_inheritable_accessor :test_url, :production_url, :debug_url
 
-      cattr_accessor :certificate
-      attr_reader :options, :req_xml, :res_xml, :res_hsh, :result
+      cattr_accessor :pem_file
+      attr_reader :options, :response, :req_xml, :res_xml, :res_hsh
 
       # Setup some class variables:
       self.debug_url = 'https://webmerchantaccount.quickbooks.com/j/diag/http'
@@ -41,16 +41,18 @@ module ActiveMerchant #:nodoc:
       # * <tt>:applogin</tt> -- Application login defined at appreg.intuit.com (REQ)
       # * <tt>:conntkt</tt> -- Connection ticket for registered application (REQ)
       # * <tt>:gw_mode</tt> -- :test, :debug, :production (need the symbol!)
-      # * <tt>:transaction_log_callback -- Model object for txn logging
-      # * <tt>:transaction_log_logger_callback -- logger object for txn logging
-      # * <tt>:test_mode_error</tt> -- Error to force if gw_mode == :test
       ########################################################################
       def initialize(options = {})
-        requires!(options, :pem, :applogin, :conntkt)        
-        @options = options
+        requires!(options, :applogin, :conntkt)        
+
+        @options = {
+          :pem => QuickbooksMerchantServiceGateway.pem_file
+          }.update(options)
+
+        raise ArgumentError, "You need to pass in your pem file using the :pem parameter or set it globally using ActiveMerchant::Billing::QuickbooksMerchantServiceGateway.pem_file = File.read( File.dirname(__FILE__) + '/../mycert.pem' ) or similar" if @options[:pem].blank?
 
         # Set the gateway mode, default to test.
-        Base.gateway_mode = @options[:gw_mode] ||= :test
+        Base.gateway_mode = @options[:gw_mode].to_sym ||= :test
         super
       end
       
@@ -200,6 +202,15 @@ module ActiveMerchant #:nodoc:
       #### START PROCESSING ACTION METHODS ####
       
       #########################################################################
+      # 0. SESSION_TICKET:
+      # Authorize a credit card for later capture
+      ########################################################################
+      def session_ticket(options = {})
+        xml = signon_app_cert_rq
+        response = commit('session_ticket', xml)
+      end
+      
+      #########################################################################
       # 1. AUTHORIZE:
       # Authorize a credit card for later capture
       ########################################################################
@@ -236,10 +247,10 @@ module ActiveMerchant #:nodoc:
       # lxml: libxml-ruby object
       ########################################################################
       def purchase(amount, creditcard, options = {})
-        xml = signon_app_cert_rq
-        response = commit('session_ticket', xml)
+        response = session_ticket
         if response.success?
           options[:session_ticket] = response.authorization
+          options[:order_id] ||= generate_unique_id
           xml = customer_credit_card_charge_rq(amount, creditcard, options)
           commit('purchase', xml)
         end
@@ -274,89 +285,55 @@ private
                 
         # Post to server
         url = get_post_url
-        # puts "URL: " + url.to_s
-        # puts "XML Req: " + xml.to_yaml
         data = ssl_post(url, xml, headers)
-        # puts "DATA Resp: " + data.to_yaml
         
         response = parse(action, data)
         message  = message_from(response)
         
-        # Transaction Logging - To Logger 
-        log_callback(action, @options[:transaction_log_logger_callback], url, xml, data, response  )
-
-        # Transaction Logging - To Database or other
-        if @options[:transaction_log_callback]
-          @options[:transaction_log_callback].send :create, {:action => url, :request => xml, :response => data, :parsed => response }
-        end
-
-        # Post Processing
+        # Post Processing - Create the Response object
         case action
           
         when 'session_ticket'
-          Response.new(success?(response), message, response, 
+          @response = Response.new(success?(response), message, response, 
                        :test => test?,
                        :authorization => response[:session_ticket]
                        )
         else
-          Response.new(success?(response), message, response, 
+          @response = Response.new(success?(response), message, response, 
                        :test => test?,
                        :authorization => response[:transaction_id],
-                       :cvv_result => response[:card_code],
-                       :avs_result => nil
+                       :cvv_result => cvv_result(response),
+                       :avs_result => avs_result(response)
                        )        
         end
       end
       
-      # Determine if transaction was successful based on :response_code
-      def success?(response)
-        response[:response_code] == 0
-      end
-      
-      # Decode and create status messages from the results of the commit
-      def message_from(results)
-        case results[:response_code]
-        when 0
-          return results[:response_reason_text]
-        when 10305
-          return "ERROR: An error occurred when validating the supplied payment data"
-        when 10309
-          return "ERROR: The credit card number is formatted incorrectly"
-        when 10312
-          return "ERROR: The credit card Transaction ID was not found"
-        when 10409
-          return CVVResult.messages[ results[:card_code] ] if CARD_CODE_ERRORS.include?(results[:card_code])
-        end
-      end
-
       # Parse the XML returned from the commit and set the applicable result variables
       def parse(action, data)
-        h = (Hash.from_xml(data)).symbolize_keys
+        h = recursively_symbolize_keys(Hash.from_xml(data))
         results = {}
+
         case action
         when 'session_ticket'
-          h = (h[:qbmsxml]['signon_msgs_rs']).symbolize_keys
-          if results[:raw]  = h[:signon_app_cert_rs].symbolize_keys
+          if results[:raw]  = h[:qbmsxml][:signon_msgs_rs][:signon_app_cert_rs]
             results[:session_ticket]            = results[:raw][:session_ticket]
           end
+          
         when 'authonly'
-          h = (h[:qbmsxml]['qbmsxml_msgs_rs']).symbolize_keys
-          if results[:raw]  = h[:customer_credit_card_auth_rs].symbolize_keys
+          if results[:raw]  = h[:customer_credit_card_auth_rs]
             results[:transaction_id]           = results[:raw][:credit_card_trans_id]
             results[:authorization_code]       = results[:raw][:authorization_code]
             results[:card_code]                = results[:raw][:card_security_code_match]
           end
         
         when 'capture'
-          h = (h[:qbmsxml]['qbmsxml_msgs_rs']).symbolize_keys
-          if results[:raw]  = h[:customer_credit_card_capture_rs].symbolize_keys
+          if results[:raw]  = h[:customer_credit_card_capture_rs]
             results[:transaction_id]           = results[:raw][:credit_card_trans_id]
             results[:authorization_code]       = results[:raw][:authorization_code]
           end
 
         when 'purchase'
-          h = (h[:qbmsxml]['qbmsxml_msgs_rs']).symbolize_keys
-          if results[:raw]  = h[:customer_credit_card_charge_rs].symbolize_keys
+          if results[:raw]  = h[:qbmsxml][:qbmsxml_msgs_rs][:customer_credit_card_charge_rs]
             results[:transaction_id]           = results[:raw][:credit_card_trans_id]
             results[:authorization_code]       = results[:raw][:authorization_code]
           end
@@ -372,19 +349,70 @@ private
         results[:response_code]             = results[:raw][:status_code].to_i
         results[:response_reason_code]      = results[:raw][:status_severity]
         results[:response_reason_text]      = results[:raw][:status_message]
-      
+        
         results
       end
       
-      # Convert a hash from string representation to symbols with underscores
-      def symbolize_hash(hsh)
-        r = {}
-        unless hsh.nil?
-          hsh.each_pair do |k,v|
-            r[k.underscore.to_sym] = v
-          end 
+      # Determine if transaction was successful based on :response_code
+      def success?(response)
+        response[:response_code] == 0
+      end
+      
+      # Assign the CVV Result code
+      def cvv_result(response)
+        case response[:raw][:card_security_code_match]
+        when "Pass"
+          return "M" # Match
+        else
+          return "P" # Not Processed
         end
-        r
+      end
+      
+      # Assign the AVS Result code
+      def avs_result(response)
+        attrs={}
+        # Check the Street Address:
+        case response[:raw][:avs_street]
+        when "Pass"
+          attrs[:street_match] = 'Y'
+        else
+          attrs[:street_match] = nil
+        end        
+        
+        # Check the Postal Code:
+        case response[:raw][:avs_zip]
+        when "Pass"
+          attrs[:postal_match] = 'Y'
+        else
+          attrs[:postal_match] = nil
+        end        
+      end
+      
+      # Decode and create status messages from the results of the commit
+      def message_from(response)
+        case response[:response_code]
+        when 0
+          return "OK"
+        when 2000
+          return "ERROR 2000: Invalid Connection Ticket"
+        when 10303
+          return "ERROR 10303: TransRequestID is empty"
+        when 10305
+          return "ERROR 10305: An error occurred when validating the supplied payment data"
+        when 10309
+          return "ERROR 10309: The credit card number is formatted incorrectly"
+        when 10312
+          return "ERROR 10312: The credit card Transaction ID was not found"
+        when 10409
+          return CVVResult.messages[ response[:card_code] ] if CARD_CODE_ERRORS.include?(response[:card_code])
+        end
+      end
+      
+      def recursively_symbolize_keys(hash)
+        return unless hash.is_a?(Hash)
+
+        hash.symbolize_keys!
+        hash.each{|k,v| recursively_symbolize_keys(v)}
       end
       
       # Populate the header and QBMSXML for a QBMSXMLMsgsRq Request
