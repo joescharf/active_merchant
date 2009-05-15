@@ -3,15 +3,6 @@ include Builder
 module ActiveMerchant #:nodoc:
   module Billing #:nodoc:
 
-    class CVVResult
-      MESSAGES = {
-        'PASS'         => 'Match',
-        'FAIL'         => 'No Match',
-        'NOTAVAILABLE' => 'Card does not support verification'
-      }
-    end
-    
-
     class QuickbooksMerchantServiceGateway < Gateway
 
       API_VERSION = '3.0'
