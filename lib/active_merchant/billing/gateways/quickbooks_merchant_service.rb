@@ -333,8 +333,7 @@ private
           end
 
         when 'void'
-          h = (h[:qbmsxml]['qbmsxml_msgs_rs']).symbolize_keys
-          if results[:raw]  = h[:customer_credit_card_txn_void_or_refund_rs].symbolize_keys
+          if results[:raw]  = h[:qbmsxml][:qbmsxml_msgs_rs][:customer_credit_card_txn_void_or_refund_rs]
             results[:transaction_id]           = results[:raw][:credit_card_trans_id]
             results[:void_type]                = results[:raw][:void_or_refund_txn_type]
           end

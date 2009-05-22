@@ -144,6 +144,24 @@ class QuickbooksMerchantServiceTest < ActionController::TestCase
     assert @gateway.response.success?
     assert_equal 0,  @gateway.response.params['response_code']
   end
+
+  test "remote create and void purchase" do
+    @options[:order_id] = generate_unique_id
+    @gateway.purchase(@amount, @credit_card, @options)
+    assert @gateway.response.success?
+    assert_equal "OK", @gateway.response.message
+    # Check the CVV Result - M indicates Match
+    assert_equal "M", @gateway.response.cvv_result['code']
+
+    auth = @gateway.response.authorization
+    
+    # Void the purchase:
+    @options[:order_id] = generate_unique_id
+    @gateway.void(auth, @options)
+    assert @gateway.response.success?
+    assert_equal "Refund", @gateway.response.params['void_type']
+    
+  end
   
   def parse(xml)
     h = Hash.from_xml(xml)
