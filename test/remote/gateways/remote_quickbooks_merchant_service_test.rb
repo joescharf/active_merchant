@@ -27,7 +27,7 @@ class QuickbooksMerchantServiceTest < ActionController::TestCase
     
     # Session ticket is stored in Response.authorization
     assert_not_nil @gateway.response.authorization
-    assert_equal @gateway.response.authorization, @gateway.response.params['raw'][:session_ticket]  
+    assert_equal @gateway.response.authorization, @gateway.response.params['raw'][:SessionTicket]  
   end
   
   test "remote get session ticket with invalid connection tkt should cause error response" do
@@ -144,7 +144,7 @@ class QuickbooksMerchantServiceTest < ActionController::TestCase
     assert @gateway.response.success?
     assert_equal 0,  @gateway.response.params['response_code']
   end
-
+  
   test "remote create and void purchase" do
     @options[:order_id] = generate_unique_id
     @gateway.purchase(@amount, @credit_card, @options)
@@ -152,7 +152,7 @@ class QuickbooksMerchantServiceTest < ActionController::TestCase
     assert_equal "OK", @gateway.response.message
     # Check the CVV Result - M indicates Match
     assert_equal "M", @gateway.response.cvv_result['code']
-
+  
     auth = @gateway.response.authorization
     
     # Void the purchase:

@@ -280,7 +280,7 @@ private
         url = get_post_url
         @request = xml
         data = ssl_post(url, xml, headers)
-        
+                
         response = parse(action, data)
         message  = message_from(response)
         
@@ -292,6 +292,8 @@ private
                        :test => test?,
                        :authorization => response[:session_ticket]
                        )
+          @response
+                      
         else
           @response = Response.new(success?(response), message, response, 
                        :test => test?,
@@ -309,39 +311,39 @@ private
 
         case action
         when 'session_ticket'
-          if results[:raw]  = h[:qbmsxml][:signon_msgs_rs][:signon_app_cert_rs]
-            results[:session_ticket]            = results[:raw][:session_ticket]
+          if results[:raw]  = h[:QBMSXML][:SignonMsgsRs][:SignonAppCertRs]
+            results[:session_ticket]            = results[:raw][:SessionTicket]
           end
           
         when 'authonly'
-          if results[:raw]  = h[:customer_credit_card_auth_rs]
-            results[:transaction_id]           = results[:raw][:credit_card_trans_id]
-            results[:authorization_code]       = results[:raw][:authorization_code]
-            results[:card_code]                = results[:raw][:card_security_code_match]
+          if results[:raw]  = h[:CustomerCreditCardAuthRs]
+            results[:transaction_id]           = results[:raw][:CreditCardTransID]
+            results[:authorization_code]       = results[:raw][:AuthorizationCode]
+            results[:card_code]                = results[:raw][:CardSecurityCodeMatch]
           end
         
         when 'capture'
-          if results[:raw]  = h[:customer_credit_card_capture_rs]
-            results[:transaction_id]           = results[:raw][:credit_card_trans_id]
-            results[:authorization_code]       = results[:raw][:authorization_code]
+          if results[:raw]  = h[:CustomerCreditCardCaptureRs]
+            results[:transaction_id]           = results[:raw][:CreditCardTransID]
+            results[:authorization_code]       = results[:raw][:AuthorizationCode]
           end
 
         when 'purchase'
-          if results[:raw]  = h[:qbmsxml][:qbmsxml_msgs_rs][:customer_credit_card_charge_rs]
-            results[:transaction_id]           = results[:raw][:credit_card_trans_id]
-            results[:authorization_code]       = results[:raw][:authorization_code]
+          if results[:raw]  = h[:QBMSXML][:QBMSXMLMsgsRs][:CustomerCreditCardChargeRs]
+            results[:transaction_id]           = results[:raw][:CreditCardTransID]
+            results[:authorization_code]       = results[:raw][:AuthorizationCode]
           end
 
         when 'void'
-          if results[:raw]  = h[:qbmsxml][:qbmsxml_msgs_rs][:customer_credit_card_txn_void_or_refund_rs]
-            results[:transaction_id]           = results[:raw][:credit_card_trans_id]
-            results[:void_type]                = results[:raw][:void_or_refund_txn_type]
+          if results[:raw]  = h[:QBMSXML][:QBMSXMLMsgsRs][:CustomerCreditCardTxnVoidOrRefundRs]
+            results[:transaction_id]           = results[:raw][:CreditCardTransID]
+            results[:void_type]                = results[:raw][:VoidOrRefundTxnType]
           end
         end
 
-        results[:response_code]             = results[:raw][:status_code].to_i
-        results[:response_reason_code]      = results[:raw][:status_severity]
-        results[:response_reason_text]      = results[:raw][:status_message]
+        results[:response_code]             = results[:raw][:statusCode].to_i
+        results[:response_reason_code]      = results[:raw][:statusSeverity]
+        results[:response_reason_text]      = results[:raw][:statusMessage]
         
         results
       end
@@ -353,7 +355,7 @@ private
       
       # Assign the CVV Result code
       def cvv_result(response)
-        case response[:raw][:card_security_code_match]
+        case response[:raw][:CardSecurityCodeMatch]
         when "Pass"
           return "M" # Match
         when "Fail"
@@ -367,7 +369,7 @@ private
       def avs_result(response)
         attrs={}
         # Check the Street Address:
-        case response[:raw][:avs_street]
+        case response[:raw][:AVSStreet]
         when "Pass"
           attrs[:street_match] = 'Y'
         when "Fail"
@@ -377,7 +379,7 @@ private
         end        
         
         # Check the Postal Code:
-        case response[:raw][:avs_zip]
+        case response[:raw][:AVSZip]
         when "Pass"
           attrs[:postal_match] = 'Y'
         when "Fail"
